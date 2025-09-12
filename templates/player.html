@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Custom HLS Player with Buffered Bar + Inline Volume</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+        background: #000;
+        font-family: sans-serif;
+      }
+
+      .player-wrapper {
+        width: 100vw;
+        height: 100vh;
+        position: relative;
+        background: #111;
+        overflow: hidden;
+      }
+
+      .video-wrapper {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100%;
+      }
+
+      video {
+        width: 100%;
+        display: block;
+        cursor: pointer;
+      }
+
+      canvas.thumb-preview {
+        position: absolute;
+        bottom: 60px;
+        left: 0;
+        transform: translateX(-50%);
+        display: none;
+        pointer-events: none;
+        border: 2px solid #fff;
+        border-radius: 4px;
+        background: #000;
+      }
+
+      .controls-bar {
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        padding: 6px 10px;
+        gap: 8px;
+        box-sizing: border-box;
+        transition: opacity 0.3s ease;
+      }
+
+      .controls-bar.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .progress-container {
+        flex: 1;
+        height: 6px;
+        background: rgba(255, 255, 255, 0.2);
+        border-radius: 3px;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .buffered {
+        height: 100%;
+        background: rgba(255, 255, 255, 0.4);
+        width: 0%;
+        position: absolute;
+        top: 0;
+        left: 0;
+        border-radius: 3px;
+      }
+
+      .progress {
+        height: 100%;
+        background: #f00;
+        width: 0%;
+        position: absolute;
+        top: 0;
+        left: 0;
+        border-radius: 3px;
+      }
+
+      button,
+      select {
+        background: rgba(0, 0, 0, 0.5);
+        color: #fff;
+        border: none;
+        padding: 4px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+      }
+
+      .time {
+        color: #fff;
+        font-size: 12px;
+        min-width: 60px;
+        text-align: center;
+      }
+
+      /* Inline volume slider */
+      #volumeWrapper {
+        display: flex;
+        align-items: center;
+        position: relative;
+        transition: width 0.3s ease;
+        width: 40px; /* just button */
+      }
+
+      #volumeSlider {
+        pointer-events: none;
+      }
+
+      #volumeWrapper:hover {
+        width: 170px; /* expand to reveal slider */
+      }
+
+      #volumeWrapper:hover #volumeSlider {
+        pointer-events: all;
+      }
+
+      #muteBtn {
+        flex-shrink: 0;
+        z-index: 2;
+      }
+
+      #volumeSlider {
+        appearance: none;
+        -webkit-appearance: none;
+        height: 4px;
+        background: rgba(255, 255, 255, 0.5);
+        accent-color: #f00;
+        border-radius: 2px;
+        margin-left: 6px;
+        flex: 1;
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+
+      #volumeWrapper:hover #volumeSlider {
+        opacity: 1;
+      }
+
+      .invalid {
+        display: none;
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        color: #fff;
+        font-size: 24px;
+        text-align: center;
+        padding-top: 20%;
+      }
+
+      .invalid h1 {
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="player-wrapper">
+      <div class="invalid" id="invalid">
+        <h1>Invalid player</h1>
+        <p id="invalid-text"></p>
+      </div>
+
+      <div class="video-wrapper">
+        <video id="video" preload="metadata"></video>
+      </div>
+      <canvas id="thumbCanvas" class="thumb-preview"></canvas>
+
+      <div class="controls-bar" id="controlsBar">
+        <button id="playPause">▶️</button>
+        <span class="time" id="currentTime">0:00</span>
+        <div class="progress-container" id="progressContainer">
+          <div class="buffered" id="buffered"></div>
+          <div class="progress" id="progress"></div>
+        </div>
+        <span class="time" id="duration">0:00</span>
+
+        <div id="volumeWrapper">
+          <button id="muteBtn">🔊</button>
+          <input
+            type="range"
+            id="volumeSlider"
+            min="0"
+            max="1"
+            step="0.01"
+            value="1"
+          />
+        </div>
+
+        <select id="qualitySelector">
+          <option value="-1">Auto</option>
+        </select>
+
+        <button id="fullscreenBtn">⛶</button>
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <script
+      type="text/javascript"
+      src="//cdn.embed.ly/player-0.1.0.min.js"
+    ></script>
+
+    <script type="module">
+      class VideoPlayer {
+        constructor(wrapper) {
+          this.wrapper = wrapper;
+          this.video = wrapper.querySelector("#video");
+          this.playPause = wrapper.querySelector("#playPause");
+          this.progress = wrapper.querySelector("#progress");
+          this.bufferedBar = wrapper.querySelector("#buffered");
+          this.progressContainer = wrapper.querySelector("#progressContainer");
+          this.currentTimeEl = wrapper.querySelector("#currentTime");
+          this.durationEl = wrapper.querySelector("#duration");
+          this.muteBtn = wrapper.querySelector("#muteBtn");
+          this.volumeSlider = wrapper.querySelector("#volumeSlider");
+          this.fullscreenBtn = wrapper.querySelector("#fullscreenBtn");
+          this.selector = wrapper.querySelector("#qualitySelector");
+          this.canvas = wrapper.querySelector("#thumbCanvas");
+          this.ctx = this.canvas.getContext("2d");
+          this.controlsBar = wrapper.querySelector("#controlsBar");
+          this.invalidDiv = wrapper.querySelector("#invalid");
+          this.invalidText = wrapper.querySelector("#invalid-text");
+          this.hls = null;
+          this.isAuto = true;
+          this.previewCollections = [];
+          this.preloadedImages = {};
+          this.fetchingPreviews = false;
+
+          this.options = {
+            autoplay: false,
+            muted: false,
+            controls: false,
+            loop: false,
+          };
+          this.hlsSrc = "/data/hls";
+
+          this.init();
+        }
+
+        // --- Initialization ---
+        init() {
+          //we start by checking if the player is valid
+          fetch("/data/validate", {
+            headers: { id: "{{.ID}}", token: "{{.TOKEN}}" },
+          })
+            .then((res) => res.json())
+            .then((data) => {
+              if (!data.valid) {
+                this.invalidDiv.style.display = "block";
+                this.invalidText.textContent = data.error || "Unknown error";
+              }
+            });
+
+          this.applyOptions();
+          this.loadPoster();
+          this.setupHls();
+          this.setupControls();
+          this.setupProgress();
+          this.setupVolume();
+          this.setupFullscreen();
+          this.setupQualitySelector();
+          this.setupThumbnails();
+          this.setupPlayerJS();
+        }
+
+        // --- Helpers ---
+        formatTime(t) {
+          return `${Math.floor(t / 60)}:${Math.floor(t % 60)
+            .toString()
+            .padStart(2, "0")}`;
+        }
+
+        togglePlay() {
+          this.video.paused ? this.video.play() : this.video.pause();
+        }
+
+        toggleMute() {
+          this.video.muted = !this.video.muted;
+          this.muteBtn.textContent = this.video.muted ? "🔇" : "🔊";
+          if (!this.video.muted) this.volumeSlider.value = this.video.volume;
+        }
+
+        // --- Options ---
+        applyOptions() {
+          const query = new URLSearchParams(window.location.search);
+          for (const [key, value] of query.entries()) {
+            if (Object.hasOwn(this.options, key) && value !== "") {
+              this.options[key] =
+                value === "true" ? true : value === "false" ? false : value;
+            }
+          }
+          if (this.options.autoplay) this.video.autoplay = true;
+          if (this.options.muted) {
+            this.video.muted = true;
+            this.muteBtn.textContent = "🔇";
+          }
+          if (this.options.loop) this.video.loop = true;
+        }
+
+        // --- Poster ---
+        async loadPoster() {
+          const r = await fetch("/data/thumbnail", {
+            headers: { id: "{{.ID}}", token: "{{.TOKEN}}" },
+          });
+          const blob = await r.blob();
+          this.video.poster = URL.createObjectURL(blob);
+        }
+
+        // --- HLS ---
+        async setupHls() {
+          if (this.video.canPlayType("application/vnd.apple.mpegurl")) {
+            this.video.src = this.hlsSrc;
+            return;
+          }
+          if (!Hls.isSupported()) return;
+
+          this.hls = new Hls({
+            startLevel: -1,
+            xhrSetup: (xhr) => {
+              xhr.setRequestHeader("id", "{{.ID}}"),
+                xhr.setRequestHeader("token", "{{.TOKEN}}");
+            },
+
+            maxBufferLength: 30,
+            maxMaxBufferLength: 60,
+          });
+
+          let res = await fetch(this.hlsSrc, {
+            headers: {
+              id: "{{.ID}}",
+              token: "{{.TOKEN}}",
+            },
+          });
+          let text = await res.text();
+
+          // rewrite URIs to your app origin
+          let origin = window.location.origin;
+          text = text.replace(/^\/(\d+p)$/gm, `${origin}/data/$1`);
+
+          let blob = new Blob([text], {
+            type: "application/vnd.apple.mpegurl",
+          });
+          let newUrl = URL.createObjectURL(blob);
+
+          this.hls.loadSource(newUrl);
+
+          this.hls.attachMedia(this.video);
+
+          this.hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            this.selector.innerHTML = `<option value="-1">Auto</option>`;
+            this.hls.levels.forEach((level, i) => {
+              const opt = document.createElement("option");
+              opt.value = i;
+              opt.text = level.height ? `${level.height}p` : `Level ${i}`;
+              this.selector.appendChild(opt);
+            });
+          });
+
+          this.hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
+            const level = this.hls.levels[data.level];
+            const height = level?.height || data.level;
+            const autoOpt = this.selector.querySelector('option[value="-1"]');
+            if (this.isAuto && autoOpt)
+              autoOpt.textContent = `Auto (${height}p)`;
+            else this.selector.value = this.hls.currentLevel;
+          });
+        }
+
+        // --- Controls ---
+        setupControls() {
+          if (!this.options.controls) {
+            this.controlsBar.classList.add("hidden");
+            return;
+          }
+          this.playPause.addEventListener("click", () => this.togglePlay());
+          this.video.addEventListener("click", () => this.togglePlay());
+
+          this.video.addEventListener(
+            "play",
+            () => (this.playPause.textContent = "⏸️")
+          );
+          this.video.addEventListener(
+            "pause",
+            () => (this.playPause.textContent = "▶️")
+          );
+          this.video.addEventListener(
+            "ended",
+            () => (this.playPause.textContent = "▶️")
+          );
+
+          this.video.addEventListener("mousemove", () => {
+            this.controlsBar.classList.remove("hidden");
+            clearTimeout(this.hideControlsTimeout);
+            this.hideControlsTimeout = setTimeout(() => {
+              this.controlsBar.classList.add("hidden");
+            }, 3000);
+          });
+          this.video.addEventListener("mouseleave", () => {
+            clearTimeout(this.hideControlsTimeout);
+            this.controlsBar.classList.add("hidden");
+          });
+        }
+
+        setupProgress() {
+          this.video.addEventListener("timeupdate", () => {
+            if (!this.video.duration) return;
+            this.progress.style.width =
+              (this.video.currentTime / this.video.duration) * 100 + "%";
+            this.currentTimeEl.textContent = this.formatTime(
+              this.video.currentTime
+            );
+            this.durationEl.textContent = this.formatTime(this.video.duration);
+          });
+
+          this.video.addEventListener("progress", () => {
+            if (!this.video.duration || !this.video.buffered.length) return;
+            const end = this.video.buffered.end(this.video.buffered.length - 1);
+            this.bufferedBar.style.width =
+              (end / this.video.duration) * 100 + "%";
+          });
+
+          this.progressContainer.addEventListener("click", (e) => {
+            const rect = this.progressContainer.getBoundingClientRect();
+            const percent = (e.clientX - rect.left) / rect.width;
+            this.video.currentTime = percent * this.video.duration;
+          });
+        }
+
+        setupFullscreen() {
+          this.fullscreenBtn.addEventListener("click", () => {
+            !document.fullscreenElement
+              ? this.wrapper.requestFullscreen()
+              : document.exitFullscreen();
+          });
+        }
+
+        setupVolume() {
+          this.video.volume = this.volumeSlider.value;
+          this.muteBtn.addEventListener("click", () => this.toggleMute());
+          this.volumeSlider.addEventListener("input", () => {
+            this.video.volume = this.volumeSlider.value;
+            this.video.muted = this.volumeSlider.value == 0;
+            this.muteBtn.textContent = this.video.muted ? "🔇" : "🔊";
+          });
+          video.addEventListener("volumechange", () => {
+            this.volumeSlider.value = video.volume;
+          });
+          video.addEventListener("mute", () => {
+            this.muteBtn.textContent = "🔇";
+          });
+          video.addEventListener("unmute", () => {
+            this.muteBtn.textContent = "🔊";
+          });
+        }
+
+        setupQualitySelector() {
+          this.selector.addEventListener("change", () => {
+            if (!this.hls) return;
+            const value = parseInt(this.selector.value);
+
+            if (value === -1) {
+              this.isAuto = true;
+              this.hls.nextLevel = -1;
+              return;
+            }
+
+            this.isAuto = false;
+            const currentTime = this.video.currentTime;
+            this.video.pause();
+            this.hls.stopLoad();
+            this.hls.detachMedia();
+            this.hls.attachMedia(this.video);
+
+            setTimeout(() => {
+              this.hls.currentLevel = value;
+              this.hls.startLoad(currentTime);
+
+              const onBuffer = () => {
+                if (
+                  this.video.buffered.length &&
+                  this.video.buffered.end(this.video.buffered.length - 1) -
+                    this.video.currentTime >
+                    0.5
+                ) {
+                  this.video.play();
+                  this.hls.off(Hls.Events.FRAG_LOADED, onBuffer);
+                }
+              };
+              this.hls.on(Hls.Events.FRAG_LOADED, onBuffer);
+            }, 100);
+          });
+        }
+
+        setupPlayerJS() {
+          this.receiver = new playerjs.Receiver();
+          this.receiver.on("play", () => {
+            video.play();
+            this.receiver.emit("play");
+          });
+
+          this.receiver.on("pause", () => {
+            video.pause();
+            this.receiver.emit("pause");
+          });
+
+          this.receiver.on("getDuration", (callback) =>
+            callback(video.duration)
+          );
+
+          this.receiver.on("getVolume", (callback) =>
+            callback(video.volume * 100)
+          );
+
+          this.receiver.on(
+            "setVolume",
+            (value) => (video.volume = value / 100)
+          );
+
+          this.receiver.on("mute", () => (video.mute = true));
+
+          this.receiver.on("unmute", () => (video.mute = false));
+
+          this.receiver.on("getMuted", (callback) => callback(video.mute));
+
+          this.receiver.on("getLoop", (callback) => callback(video.loop));
+
+          this.receiver.on("setLoop", (value) => (video.loop = value));
+
+          video.addEventListener("ended", () => this.receiver.emit("ended"));
+
+          video.addEventListener("timeupdate", () => {
+            this.receiver.emit("timeupdate", {
+              seconds: video.currentTime,
+              duration: video.duration,
+            });
+          });
+
+          this.receiver.ready();
+        }
+
+        // --- Thumbnails ---
+        setupThumbnails() {
+          this.progressContainer.addEventListener("mousemove", (e) =>
+            this.showThumbnail(e)
+          );
+          this.progressContainer.addEventListener("mouseleave", () => {
+            this.canvas.style.display = "none";
+          });
+        }
+
+        async loadPreviews() {
+          if (this.fetchingPreviews) return;
+          this.fetchingPreviews = true;
+          const r = await fetch("/data/previews", {
+            headers: { id: "{{.ID}}", token: "{{.TOKEN}}" },
+          });
+          const data = await r.json();
+          this.previewCollections = data;
+
+          for (const col of data) {
+            if (!this.preloadedImages[col.Id]) {
+              const url = `/data/previews/${col.Id}`;
+              const img = new Image();
+              const fetched = await fetch(url, {
+                headers: { id: "{{.ID}}", token: "{{.TOKEN}}" },
+              });
+              img.src = URL.createObjectURL(await fetched.blob());
+              this.preloadedImages[col.Id] = img;
+            }
+          }
+          this.fetchingPreviews = false;
+        }
+
+        async showThumbnail(e) {
+          if (!this.video.duration) return;
+          if (!this.previewCollections.length) await this.loadPreviews();
+          if (!this.previewCollections.length) return;
+
+          const progRect = this.progressContainer.getBoundingClientRect();
+          let time = Math.floor(
+            ((e.clientX - progRect.left) / progRect.width) * this.video.duration
+          );
+
+          for (const col of this.previewCollections) {
+            const colDuration = col.Amount * col.TileInterval;
+            if (time < colDuration) {
+              const index = Math.floor(time / col.TileInterval);
+              const x = index * col.W;
+              const img = this.preloadedImages[col.Id];
+
+              if (img?.complete) {
+                this.canvas.width = col.W;
+                this.canvas.height = col.H;
+                this.ctx.clearRect(0, 0, col.W, col.H);
+                this.ctx.drawImage(img, x, 0, col.W, col.H, 0, 0, col.W, col.H);
+
+                const wrapperRect = this.wrapper.getBoundingClientRect();
+                let centerX = e.clientX - wrapperRect.left;
+                const half = this.canvas.width / 2;
+                if (centerX < half) centerX = half;
+                if (centerX > wrapperRect.width - half)
+                  centerX = wrapperRect.width - half;
+                this.canvas.style.left = centerX + "px";
+                this.canvas.style.display = "block";
+              }
+              return;
+            }
+            time -= colDuration;
+          }
+          this.canvas.style.display = "none";
+        }
+      }
+
+      // --- Init ---
+      document.addEventListener("DOMContentLoaded", () => {
+        const wrapper = document.querySelector(".player-wrapper");
+        if (wrapper) new VideoPlayer(wrapper);
+      });
+    </script>
+  </body>
+</html>
