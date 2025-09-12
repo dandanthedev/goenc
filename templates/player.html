@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>Custom HLS Player with Buffered Bar + Inline Volume</title>
+    <title>Player</title>
     <style>
       body {
         margin: 0;
@@ -407,14 +407,14 @@
             () => (this.playPause.textContent = "▶️")
           );
 
-          this.video.addEventListener("mousemove", () => {
+          document.body.addEventListener("mousemove", () => {
             this.controlsBar.classList.remove("hidden");
             clearTimeout(this.hideControlsTimeout);
             this.hideControlsTimeout = setTimeout(() => {
               this.controlsBar.classList.add("hidden");
             }, 3000);
           });
-          this.video.addEventListener("mouseleave", () => {
+          document.body.addEventListener("mouseleave", () => {
             clearTimeout(this.hideControlsTimeout);
             this.controlsBar.classList.add("hidden");
           });
