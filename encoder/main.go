@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"goenc/storage"
 	"log/slog"
+	"os"
 	"strconv"
 	"strings"
 
@@ -24,14 +25,14 @@ type SizeMappingType struct {
 }
 
 var SizeMapping []SizeMappingType = []SizeMappingType{
-	{"2160p", "3840:2160", "12000k", "192k", "15000k", "18"},
-	{"1440p", "2560:1440", "8000k", "160k", "10000k", "19"},
-	{"1080p", "1920:1080", "5000k", "128k", "6000k", "20"},
-	{"720p", "1280:720", "2800k", "128k", "4000k", "21"},
-	{"480p", "854:480", "1400k", "96k", "2000k", "23"},
-	{"360p", "640:360", "800k", "96k", "1600k", "24"},
-	{"240p", "426:240", "500k", "64k", "1000k", "25"},
-	{"144p", "256:144", "300k", "64k", "600k", "26"},
+	{"2160p", "3840:2160", "6000k", "192k", "9000k", "20"},
+	{"1440p", "2560:1440", "4000k", "160k", "6000k", "21"},
+	{"1080p", "1920:1080", "2500k", "128k", "4000k", "22"},
+	{"720p", "1280:720", "1500k", "128k", "2500k", "23"},
+	{"480p", "854:480", "900k", "96k", "1500k", "24"},
+	{"360p", "640:360", "600k", "96k", "1200k", "25"},
+	{"240p", "426:240", "400k", "64k", "800k", "26"},
+	{"144p", "256:144", "200k", "64k", "400k", "27"},
 }
 
 func getSizeMapping(size string) SizeMappingType {
@@ -72,50 +73,91 @@ func EncodeFile(input string, id string, sizes string) error {
 		sm := getSizeMapping(s)
 		outputDir := "tmp/" + id + "/" + sm.Label
 		storage.LocalDirectoryCreate(outputDir)
-		// Encode each resolution
-		cmd := ffmpeg.Input(input).
-			Output(fmt.Sprintf("data/%s/index.m3u8", outputDir),
-				ffmpeg.KwArgs{
-					"c:v":     "libx264",
-					"preset":  "slow", // better quality at same bitrate
-					"crf":     sm.Crf,
-					"maxrate": sm.VideoBitrate,
-					"bufsize": sm.Bufsize,
-					"vf": fmt.Sprintf(
-						"scale=w=%s:h=%s:force_original_aspect_ratio=decrease:force_divisible_by=2",
-						strings.Split(sm.Scale, ":")[0],
-						strings.Split(sm.Scale, ":")[1],
-					),
-					"c:a":                  "aac",
-					"b:a":                  sm.AudioBitrate,
-					"hls_time":             "4",
-					"hls_playlist_type":    "vod",
-					"hls_segment_type":     "fmp4",
-					"hls_segment_filename": fmt.Sprintf("data/%s/seg_%%03d.m4s", outputDir),
-				},
-			).OverWriteOutput()
 
-		slog.Info("Encoding resolution", "resolution", sm.Label, "bitrate", sm.VideoBitrate, "id", id)
-		err := cmd.Run()
-		if err != nil {
+		sm.Scale = strings.ReplaceAll(sm.Scale, ":", "x") // for master playlist
+
+		hwaccel := os.Getenv("FFMPEG_HARDWARE_ACCEL")
+		if hwaccel != "" {
+			slog.Info("Using hardware acceleration", "hwaccel", hwaccel)
+		} else {
+			hwaccel = "none"
+		}
+
+		// First pass (bitrate analysis)
+		pass1 := ffmpeg.Input(input, ffmpeg.KwArgs{
+			"hwaccel": hwaccel,
+		}).
+			Output("/dev/null", ffmpeg.KwArgs{
+				"c:v":     "libx265",
+				"preset":  "slow",
+				"b:v":     sm.VideoBitrate, // bitrate mode
+				"maxrate": sm.VideoBitrate,
+				"bufsize": sm.Bufsize,
+				"vf": fmt.Sprintf(
+					"scale=w=%s:h=%s:force_original_aspect_ratio=decrease:force_divisible_by=2",
+					strings.Split(sm.Scale, "x")[0],
+					strings.Split(sm.Scale, "x")[1],
+				),
+				"c:a":         "aac",
+				"b:a":         sm.AudioBitrate,
+				"pass":        "1",
+				"an":          "",    // disable audio for first pass
+				"f":           "mp4", // required for /dev/null replacement
+				"passlogfile": fmt.Sprintf("data/%s/logfile", outputDir),
+			}).OverWriteOutput()
+
+		slog.Info("Encoding first pass", "resolution", sm.Label)
+		if err := pass1.Run(); err != nil {
+			slog.Error("Failed to encode first pass", "resolution", sm.Label, "error", err)
 			return err
 		}
-		slog.Info("Encoding resolution done", "resolution", sm.Label, "bitrate", sm.VideoBitrate)
 
-		//get all files in the temp dir and move them to the output dir
-		files := storage.LocalDirectoryListing("tmp/" + id + "/" + sm.Label)
-		for _, file := range files {
-			src := "tmp/" + id + "/" + sm.Label + "/" + file
-			dst := id + "/" + sm.Label + "/" + file
-			slog.Debug("Moving file to final storage", "src", src, "dst", dst)
-			storage.FilePut(dst, storage.LocalFileGet(src))
-			storage.LocalFileDelete(src)
+		// Second pass (generate HLS)
+		pass2 := ffmpeg.Input(input, ffmpeg.KwArgs{
+			"hwaccel": hwaccel,
+		}).
+			Output(fmt.Sprintf("data/%s/index.m3u8", outputDir), ffmpeg.KwArgs{
+				"c:v":     "libx265",
+				"preset":  "slow",
+				"b:v":     sm.VideoBitrate, // bitrate mode
+				"maxrate": sm.VideoBitrate,
+				"bufsize": sm.Bufsize,
+				"vf": fmt.Sprintf(
+					"scale=w=%s:h=%s:force_original_aspect_ratio=decrease:force_divisible_by=2",
+					strings.Split(sm.Scale, "x")[0],
+					strings.Split(sm.Scale, "x")[1],
+				),
+				"c:a":                  "aac",
+				"b:a":                  sm.AudioBitrate,
+				"hls_time":             "4",
+				"hls_playlist_type":    "vod",
+				"hls_segment_type":     "fmp4",
+				"hls_segment_filename": fmt.Sprintf("data/%s/seg_%%03d.m4s", outputDir),
+				"pass":                 "2",
+				"passlogfile":          fmt.Sprintf("data/%s/logfile", outputDir),
+			}).OverWriteOutput()
+
+		slog.Info("Encoding second pass", "resolution", sm.Label)
+		if err := pass2.Run(); err != nil {
+			slog.Error("Failed to encode second pass", "resolution", sm.Label, "error", err)
+			return err
 		}
 
-		sm.Scale = strings.ReplaceAll(sm.Scale, ":", "x")
+		// Move files from temp to final storage
+		files := storage.LocalDirectoryListing(outputDir)
+		for _, file := range files {
+			src := outputDir + "/" + file
+			dst := id + "/" + sm.Label + "/" + file
+			storage.FilePut(dst, storage.LocalFileGet(src))
+			storage.LocalFileDelete(src)
+			slog.Debug("Moved file to final storage", "src", src, "dst", dst)
+		}
 
-		// Add entry to master playlist
-		masterPlaylist.WriteString(fmt.Sprintf("#EXT-X-STREAM-INF:BANDWIDTH=%s,RESOLUTION=%s\n/%s\n", sm.VideoBitrate, sm.Scale, sm.Label))
+		// Update master playlist
+		masterPlaylist.WriteString(fmt.Sprintf(
+			"#EXT-X-STREAM-INF:BANDWIDTH=%s,RESOLUTION=%s\n/%s\n",
+			sm.VideoBitrate, sm.Scale, sm.Label,
+		))
 	}
 
 	// Write master playlist
