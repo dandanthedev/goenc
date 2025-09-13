@@ -65,7 +65,7 @@ func S3FileExists(path string) bool {
 	return err == nil
 }
 
-func S3FileGet(path string, download bool) GetResult {
+func S3FileGet(path string, download bool) (GetResult, error) {
 	if download {
 		//download file
 		data, err := s3Client.GetObject(context.TODO(), &s3.GetObjectInput{
@@ -73,16 +73,16 @@ func S3FileGet(path string, download bool) GetResult {
 			Key:    aws.String(path),
 		})
 		if err != nil {
-			panic("failed to download file: " + err.Error())
+			return GetResult{}, err
 		}
 		defer data.Body.Close()
 		buf := new(bytes.Buffer)
 		_, err = buf.ReadFrom(data.Body)
 		if err != nil {
-			panic("failed to read file body: " + err.Error())
+			return GetResult{}, err
 		}
 		bytesData := buf.Bytes()
-		return GetResult{Data: &bytesData}
+		return GetResult{Data: &bytesData}, nil
 	} else {
 		//generate presigned url
 		presignClient := s3.NewPresignClient(s3Client)
@@ -93,29 +93,64 @@ func S3FileGet(path string, download bool) GetResult {
 			po.Expires = time.Second * 10
 		})
 		if err != nil {
-			panic("failed to generate presigned url: " + err.Error())
+			return GetResult{}, err
 		}
-		return GetResult{URL: &presignedReq.URL}
+		return GetResult{URL: &presignedReq.URL}, nil
 	}
 }
 
-func S3FilePut(path string, data []byte) {
+func S3FilePut(path string, data []byte) error {
 	_, err := s3Client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket: aws.String(os.Getenv("S3_BUCKET")),
 		Key:    aws.String(path),
 		Body:   bytes.NewReader(data),
 	})
-	if err != nil {
-		panic("failed to upload file: " + err.Error())
-	}
+	return err
 }
 
-func S3FileDelete(path string) {
+func S3FileDelete(path string) error {
 	_, err := s3Client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
 		Bucket: aws.String(os.Getenv("S3_BUCKET")),
 		Key:    aws.String(path),
 	})
-	if err != nil {
-		panic("failed to delete file: " + err.Error())
+	return err
+}
+
+func S3DirectoryDelete(path string) error {
+	_, err := s3Client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+		Bucket: aws.String(os.Getenv("S3_BUCKET")),
+		Key:    aws.String(path),
+	})
+	return err
+}
+
+func S3DirectoryListing(path string, recursive bool) ([]string, error) {
+	var result []string
+	input := &s3.ListObjectsV2Input{
+		Bucket: aws.String(os.Getenv("S3_BUCKET")),
+		Prefix: aws.String(path),
 	}
+	if !recursive {
+		input.Delimiter = aws.String("/")
+	}
+	paginator := s3.NewListObjectsV2Paginator(s3Client, input)
+	for paginator.HasMorePages() {
+		page, err := paginator.NextPage(context.TODO())
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range page.Contents {
+			if file.Key != nil {
+				result = append(result, *file.Key)
+			}
+		}
+		if !recursive {
+			for _, prefix := range page.CommonPrefixes {
+				if prefix.Prefix != nil {
+					result = append(result, *prefix.Prefix)
+				}
+			}
+		}
+	}
+	return result, nil
 }

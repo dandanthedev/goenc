@@ -16,15 +16,15 @@ func LocalFileExists(path string) bool {
 	return !os.IsNotExist(err)
 }
 
-func LocalFileGet(path string) []byte {
+func LocalFileGet(path string) ([]byte, error) {
 	data, err := os.ReadFile("data/" + path)
 	if err != nil {
-		panic("failed to read file: " + err.Error())
+		return nil, err
 	}
-	return data
+	return data, nil
 }
 
-func LocalFilePut(path string, data []byte) {
+func LocalFilePut(path string, data []byte) error {
 	// create dir if it doesn't exist. get the directory part of the path
 	dir := "data/" + strings.TrimSuffix(path, "/"+filepath.Base(path))
 	if dir != "data/" {
@@ -33,20 +33,24 @@ func LocalFilePut(path string, data []byte) {
 	slog.Debug("Writing local file", "path", path)
 	err := os.WriteFile("data/"+path, data, 0644)
 	if err != nil {
-		panic("failed to write file: " + err.Error())
+		return err
 	}
+	return nil
 }
 
-func LocalDirectoryCreate(path string) {
+func LocalDirectoryCreate(path string) error {
 	path = "data/" + path
 	slog.Debug("Creating local directory", "path", path)
-	os.MkdirAll(path, 0755)
+	return os.MkdirAll(path, 0755)
 }
 
-func LocalDirectoryListing(path string) []string {
+func LocalDirectoryListing(path string, recursive bool) ([]string, error) {
+	if recursive {
+		return filepath.Glob("data/" + path + "/*")
+	}
 	files, err := os.ReadDir("data/" + path)
 	if err != nil {
-		panic("failed to read directory: " + err.Error())
+		return nil, err
 	}
 	var fileNames []string
 	for _, file := range files {
@@ -55,19 +59,21 @@ func LocalDirectoryListing(path string) []string {
 		}
 		fileNames = append(fileNames, file.Name())
 	}
-	return fileNames
+	return fileNames, nil
 }
 
-func LocalFileDelete(path string) {
+func LocalFileDelete(path string) error {
 	err := os.Remove("data/" + path)
 	if err != nil {
-		panic("failed to delete file: " + err.Error())
+		return err
 	}
+	return nil
 }
 
-func LocalDirectoryDelete(path string) {
+func LocalDirectoryDelete(path string) error {
 	err := os.RemoveAll("data/" + path)
 	if err != nil {
-		panic("failed to delete directory: " + err.Error())
+		return err
 	}
+	return nil
 }

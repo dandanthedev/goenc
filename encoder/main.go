@@ -58,7 +58,9 @@ func EncodeFile(input string, id string, sizes string) error {
 
 	//if a folder with the same name already exists, check if it has a meta.json file. if not, delete the folder and start over
 	metaPath := id + "/meta.json"
-	if storage.FileExists(metaPath) {
+
+	fileExists := storage.FileExists(metaPath)
+	if fileExists {
 		slog.Info("File already encoded, skipping", "id", id)
 		return nil
 	}
@@ -144,11 +146,20 @@ func EncodeFile(input string, id string, sizes string) error {
 		}
 
 		// Move files from temp to final storage
-		files := storage.LocalDirectoryListing(outputDir)
+		files, err := storage.LocalDirectoryListing(outputDir, false)
+		if err != nil {
+			return err
+		}
 		for _, file := range files {
 			src := outputDir + "/" + file
 			dst := id + "/" + sm.Label + "/" + file
-			storage.FilePut(dst, storage.LocalFileGet(src))
+			file, err := storage.LocalFileGet(src)
+			if err != nil {
+				return err
+			}
+			if err := storage.FilePut(dst, file); err != nil {
+				return err
+			}
 			storage.LocalFileDelete(src)
 			slog.Debug("Moved file to final storage", "src", src, "dst", dst)
 		}
@@ -182,8 +193,16 @@ func EncodeFile(input string, id string, sizes string) error {
 	}
 
 	//move the thumbnail to the final storage
-	storage.FilePut(id+"/imgs/thumbnail.jpg", storage.LocalFileGet("tmp/"+id+"/imgs/thumbnail.jpg"))
-	storage.LocalFileDelete("tmp/" + id + "/imgs/thumbnail.jpg")
+	file, err := storage.LocalFileGet("tmp/" + id + "/imgs/thumbnail.jpg")
+	if err != nil {
+		return err
+	}
+	if err := storage.FilePut(id+"/imgs/thumbnail.jpg", file); err != nil {
+		return err
+	}
+	if err := storage.LocalFileDelete("tmp/" + id + "/imgs/thumbnail.jpg"); err != nil {
+		return err
+	}
 
 	type Preview struct {
 		Id           int
@@ -207,7 +226,11 @@ func EncodeFile(input string, id string, sizes string) error {
 	}
 
 	//read the sheets
-	sheets := storage.LocalDirectoryListing("tmp/" + id + "/imgs")
+	sheets, err := storage.LocalDirectoryListing("tmp/"+id+"/imgs", false)
+
+	if err != nil {
+		return err
+	}
 
 	for _, sheet := range sheets {
 		if !strings.HasPrefix(sheet, "prev-") {
@@ -228,8 +251,16 @@ func EncodeFile(input string, id string, sizes string) error {
 
 	//move the previews to the final storage
 	for _, preview := range previews {
-		storage.FilePut(id+"/imgs/prev-"+strconv.Itoa(preview.Id)+".jpg", storage.LocalFileGet("tmp/"+id+"/imgs/prev-"+strconv.Itoa(preview.Id)+".jpg"))
-		storage.LocalFileDelete("tmp/" + id + "/imgs/prev-" + strconv.Itoa(preview.Id) + ".jpg")
+		file, err := storage.LocalFileGet("tmp/" + id + "/imgs/prev-" + strconv.Itoa(preview.Id) + ".jpg")
+		if err != nil {
+			return err
+		}
+		if err := storage.FilePut(id+"/imgs/prev-"+strconv.Itoa(preview.Id)+".jpg", file); err != nil {
+			return err
+		}
+		if err := storage.LocalFileDelete("tmp/" + id + "/imgs/prev-" + strconv.Itoa(preview.Id) + ".jpg"); err != nil {
+			return err
+		}
 	}
 
 	//write previews

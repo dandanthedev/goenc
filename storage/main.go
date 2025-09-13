@@ -40,21 +40,28 @@ type GetResult struct {
 	URL  *string
 }
 
-func FileGet(path string, download bool) GetResult {
+func FileGet(path string, download bool) (GetResult, error) {
 	switch storageMode {
 	case "local":
-		data := LocalFileGet(path)
-		return GetResult{Data: &data}
+		data, err := LocalFileGet(path)
+		if err != nil {
+			return GetResult{}, err
+		}
+		return GetResult{Data: &data}, nil
 	case "s3":
-		data := S3FileGet(path, download)
-		return data
+		return S3FileGet(path, download)
+
 	default:
 		panic("invalid storage mode")
 	}
 }
 
-func ServeFile(path string, w http.ResponseWriter) {
-	file := FileGet(path, false)
+func ServeFile(path string, w http.ResponseWriter, download bool) {
+	file, err := FileGet(path, download)
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
 	if file.URL != nil {
 		w.Header().Set("Location", *file.URL)
 		w.WriteHeader(http.StatusFound)
@@ -68,45 +75,67 @@ func ServeFile(path string, w http.ResponseWriter) {
 
 }
 
-func FilePut(path string, data []byte) {
+func FilePut(path string, data []byte) error {
 	switch storageMode {
 	case "local":
-		LocalFilePut(path, data)
+		return LocalFilePut(path, data)
 	case "s3":
-		S3FilePut(path, data)
+		return S3FilePut(path, data)
 	default:
 		panic("invalid storage mode")
 	}
 }
 
-func DirectoryCreate(path string) {
+func DirectoryCreate(path string) error {
 	switch storageMode {
 	case "local":
-		LocalDirectoryCreate(path)
+		return LocalDirectoryCreate(path)
 	case "s3":
 		slog.Debug("S3 bucket does not support directory creation", "path", path)
+		return nil
 	default:
 		panic("invalid storage mode")
 	}
 }
 
-func FileDelete(path string) {
+func FileDelete(path string) error {
 	switch storageMode {
 	case "local":
-		LocalFileDelete(path)
+		return LocalFileDelete(path)
 	case "s3":
-		S3FileDelete(path)
+		return S3FileDelete(path)
 	default:
 		panic("invalid storage mode")
 	}
 }
 
-func DirectoryDelete(path string) {
+func DirectoryDelete(path string) error {
 	switch storageMode {
 	case "local":
-		LocalDirectoryDelete(path)
+		return LocalDirectoryDelete(path)
 	case "s3":
-		slog.Debug("S3 bucket does not support directory deletion", "path", path)
+		files, err := S3DirectoryListing(path, true)
+		if err != nil {
+			return err
+		}
+		for _, file := range files {
+			slog.Debug("Deleting S3 file", "file", file)
+			if err := S3FileDelete(file); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
+		panic("invalid storage mode")
+	}
+}
+
+func DirectoryListing(path string, recursive bool) ([]string, error) {
+	switch storageMode {
+	case "local":
+		return LocalDirectoryListing(path, recursive)
+	case "s3":
+		return S3DirectoryListing(path, recursive)
 	default:
 		panic("invalid storage mode")
 	}
