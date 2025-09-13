@@ -99,7 +99,36 @@ func main() {
 		})
 	})
 
-	r.Post("/key", func(w http.ResponseWriter, r *http.Request) {
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasPrefix(r.URL.Path, "/api") {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			token := r.Header.Get("X-API-KEY")
+
+			if token == "" {
+				replyWithJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing x-api-key header"})
+				return
+			}
+
+			apiKey := os.Getenv("API_KEY")
+			if apiKey == "" {
+				replyWithJSON(w, http.StatusUnauthorized, map[string]string{"error": "API_KEY is not set"})
+				return
+			}
+
+			if token != apiKey {
+				replyWithJSON(w, http.StatusUnauthorized, map[string]string{"error": "api key is invalid"})
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	r.Post("/api/key", func(w http.ResponseWriter, r *http.Request) {
 		var data map[string]any
 
 		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
@@ -204,13 +233,13 @@ func main() {
 
 	})
 
-	r.Get("/queue", func(w http.ResponseWriter, r *http.Request) {
+	r.Get("/api/queue", func(w http.ResponseWriter, r *http.Request) {
 		queue := encoder.GetQueue()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(queue)
 	})
 
-	r.Post("/upload", func(w http.ResponseWriter, r *http.Request) {
+	r.Post("/api/upload", func(w http.ResponseWriter, r *http.Request) {
 		//get file id from query
 		id := r.URL.Query().Get("id")
 		if id == "" {
