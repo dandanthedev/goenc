@@ -7,6 +7,7 @@ export S3_REGION=us-east-1
 export S3_KEY_ID=minioadmin
 export S3_KEY_SECRET=minioadmin
 export S3_ENDPOINT=http://localhost:9000
+export LOCAL_STORAGE_PATH=localdata/
 export ENCODING_RESOLUTIONS="144p,240p,360p,480p,720p,1080p"
 export API_KEY=verysecret
 export REDIS_ADDR=localhost:6379

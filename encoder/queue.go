@@ -48,6 +48,7 @@ type QueueItem struct {
 	Source   string `json:"source"`
 	Profiles string `json:"profiles"`
 	Status   Status `json:"status"`
+	Step     string `json:"step,omitempty"`
 	Attempts int    `json:"attempts"`
 	WorkerID string `json:"worker_id,omitempty"`
 }
@@ -61,7 +62,7 @@ func StartHeartbeat(ctx context.Context) {
 	}()
 }
 
-func modifyQueueItem(id string, status Status, attempts int) error {
+func ModifyQueueItem(id string, status Status, attempts int, step string) error {
 	ctx := context.Background()
 	item, err := Redis.Get(ctx, "queue:"+id).Result()
 	if err != nil {
@@ -73,7 +74,12 @@ func modifyQueueItem(id string, status Status, attempts int) error {
 		return err
 	}
 	data.Status = status
-	data.Attempts = attempts
+	if attempts > 0 {
+		data.Attempts = attempts
+	}
+	if step != "" {
+		data.Step = step
+	}
 	switch status {
 	case Processing:
 		data.WorkerID = WorkerID
@@ -107,7 +113,7 @@ func StartTaskProcessor() {
 		}
 		id := item[1]
 		// Mark as processing before actual processing
-		err = modifyQueueItem(id, Processing, 0)
+		err = ModifyQueueItem(id, Processing, 0, "")
 		if err != nil {
 			slog.Error("Failed to set item to processing", "id", id, "error", err)
 			continue
@@ -129,13 +135,13 @@ func StartTaskProcessor() {
 			slog.Error("Failed to process file", "id", data.Id, "error", err)
 			//if attempts >= 3, set status to fail
 			if data.Attempts >= 3 {
-				err := modifyQueueItem(data.Id, Fail, data.Attempts+1)
+				err := ModifyQueueItem(data.Id, Fail, data.Attempts+1, "")
 				if err != nil {
 					slog.Error("Failed to modify queue item", "id", data.Id, "error", err)
 					continue
 				}
 			} else {
-				err := modifyQueueItem(data.Id, Waiting, data.Attempts+1)
+				err := ModifyQueueItem(data.Id, Waiting, data.Attempts+1, "")
 				if err != nil {
 					slog.Error("Failed to modify queue item", "id", data.Id, "error", err)
 					continue
@@ -146,7 +152,7 @@ func StartTaskProcessor() {
 			continue
 		}
 		// Mark as done
-		err = modifyQueueItem(data.Id, Done, data.Attempts)
+		err = ModifyQueueItem(data.Id, Done, data.Attempts, "")
 		if err != nil {
 			slog.Error("Failed to set item to done", "id", data.Id, "error", err)
 			continue
@@ -177,7 +183,7 @@ func RecoverStuckProcessingJobs() {
 			heartbeat, err := Redis.Get(ctx, "worker:"+data.WorkerID+":heartbeat").Result()
 			if err == redis.Nil || heartbeat == "" {
 				slog.Info("Recovering stuck job", "id", data.Id, "worker_id", data.WorkerID)
-				modifyQueueItem(data.Id, Waiting, data.Attempts+1)
+				ModifyQueueItem(data.Id, Waiting, data.Attempts+1, "")
 				Redis.RPush(ctx, "queue:all", data.Id)
 			}
 		}
@@ -186,6 +192,37 @@ func RecoverStuckProcessingJobs() {
 		slog.Error("Failed to scan queue keys for recovery", "error", err)
 	}
 	slog.Info("Recovery done")
+}
+
+func RemoveCompletedJobs() {
+	ctx := context.Background()
+	iter := Redis.Scan(ctx, 0, "queue:*", 0).Iterator()
+	for iter.Next(ctx) {
+		key := iter.Val()
+		if key == "queue:all" {
+			continue
+		}
+		item, err := Redis.Get(ctx, key).Result()
+		if err != nil {
+			slog.Error("Failed to get queue item", "key", key, "error", err)
+			continue
+		}
+		var data QueueItem
+		err = json.Unmarshal([]byte(item), &data)
+		if err != nil {
+			slog.Error("Failed to unmarshal queue item", "key", key, "error", err)
+			continue
+		}
+		if data.Status == Done {
+			slog.Info("Removing completed job from queue", "id", data.Id)
+			Redis.Del(ctx, key)
+		}
+		if data.Status == Fail {
+			slog.Info("Removing failed job from queue", "id", data.Id)
+			Redis.Del(ctx, key)
+		}
+
+	}
 }
 
 func AddFileToQueue(source string, id string, profiles string) string {

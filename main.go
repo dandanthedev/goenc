@@ -36,6 +36,7 @@ func main() {
 	slog.SetLogLoggerLevel(slog.LevelDebug)
 
 	storage.InitStorage()
+	storage.InitLocalStorage() //we always want local storage for storing tmp files
 
 	workerTasks := strings.Split(os.Getenv("TASKS"), ",")
 	for _, task := range workerTasks {

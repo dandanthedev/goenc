@@ -166,6 +166,11 @@ func APIRouter(inputRouter chi.Router) {
 		w.WriteHeader(http.StatusNoContent)
 	})
 
+	r.Post("/queue/cleanup", func(w http.ResponseWriter, r *http.Request) {
+		encoder.RemoveCompletedJobs()
+		w.WriteHeader(http.StatusNoContent)
+	})
+
 	r.Post("/upload", func(w http.ResponseWriter, r *http.Request) {
 		//get file id from query
 		id := r.URL.Query().Get("id")
@@ -216,7 +221,7 @@ func APIRouter(inputRouter chi.Router) {
 		}
 		storage.LocalFilePut("tmp/"+id+"/"+"input", fileBytes)
 
-		id = encoder.AddFileToQueue("data/tmp/"+id+"/"+"input", id, profiles)
+		id = encoder.AddFileToQueue(storage.LocalStoragePath+"/tmp/"+id+"/"+"input", id, profiles)
 
 		ReplyWithJSON(w, http.StatusOK, map[string]string{"id": id})
 	})
