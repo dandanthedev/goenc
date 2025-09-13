@@ -88,7 +88,7 @@ func EncodeFile(input string, id string, sizes string) error {
 			"hwaccel": hwaccel,
 		}).
 			Output("/dev/null", ffmpeg.KwArgs{
-				"c:v":     "libx265",
+				"c:v":     "libx264",
 				"preset":  "slow",
 				"b:v":     sm.VideoBitrate, // bitrate mode
 				"maxrate": sm.VideoBitrate,
@@ -117,7 +117,7 @@ func EncodeFile(input string, id string, sizes string) error {
 			"hwaccel": hwaccel,
 		}).
 			Output(fmt.Sprintf("data/%s/index.m3u8", outputDir), ffmpeg.KwArgs{
-				"c:v":     "libx265",
+				"c:v":     "libx264",
 				"preset":  "slow",
 				"b:v":     sm.VideoBitrate, // bitrate mode
 				"maxrate": sm.VideoBitrate,
