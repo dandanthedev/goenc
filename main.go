@@ -1,10 +1,12 @@
 package main
 
 import (
+	"embed"
 	"goenc/api"
 	"goenc/encoder"
 	"goenc/player"
 	"goenc/storage"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -15,12 +17,28 @@ import (
 	"github.com/go-co-op/gocron/v2"
 )
 
+//go:embed dist
+var ui embed.FS
+
 func InitServer() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 
 	api.APIRouter(r)
 	api.VideoDataRouter(r)
+
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		//redirect to ui
+		w.Header().Set("Location", "/ui/")
+		w.WriteHeader(http.StatusFound)
+	})
+
+	distFS, err := fs.Sub(ui, "dist")
+	if err != nil {
+		slog.Error("Failed to get dist subdirectory from embedded FS", "error", err)
+		os.Exit(1)
+	}
+	r.Handle("/ui/*", http.StripPrefix("/ui/", http.FileServer(http.FS(distFS))))
 
 	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
 		w.Write([]byte(player.GeneratePlayer(chi.URLParam(r, "id"), r.URL.Query().Get("token"))))

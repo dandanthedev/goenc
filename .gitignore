@@ -1,2 +1,4 @@
 localdata/
 tmp/
+dist/
+bin/
