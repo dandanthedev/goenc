@@ -1,13 +1,17 @@
 package player
 
 import (
+	"embed"
 	"html/template"
 	"log"
 	"log/slog"
 	"strings"
 )
 
-var tmpl = template.Must(template.ParseFiles("templates/player.html"))
+//go:embed templates
+var templates embed.FS
+
+var tmpl = template.Must(template.ParseFS(templates, "templates/player.html"))
 
 func GeneratePlayer(id string, token string) string {
 	filePrefix := "/data/" + id
