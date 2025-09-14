@@ -43,21 +43,12 @@ func getSizeMapping(size string) SizeMappingType {
 }
 
 func reportStatus(id string, status string) {
+	slog.Info("Status update", "id", id, "status", status)
 	ModifyQueueItem(id, Processing, 0, status)
 }
 
 func EncodeFile(input string, id string, sizes string) error {
 	reportStatus(id, "starting")
-
-	reportStatus(id, "downloading_file")
-	file, err := storage.FileGet(input, true)
-	if err != nil {
-		reportStatus(id, "error_downloading_file")
-		return err
-	}
-
-	reportStatus(id, "file_downloaded")
-	storage.LocalFilePut("tmp/"+id+"/"+"input", *file.Data)
 
 	reportStatus(id, "parsing_sizes")
 
@@ -90,6 +81,18 @@ func EncodeFile(input string, id string, sizes string) error {
 	storage.LocalDirectoryCreate("tmp/" + id)
 	storage.DirectoryCreate(id)
 
+	reportStatus(id, "downloading_file")
+	file, err := storage.FileGet(input, true)
+	if err != nil {
+		reportStatus(id, "error_downloading_file")
+		return err
+	}
+
+	reportStatus(id, "file_downloaded")
+	storage.LocalFilePut("tmp/"+id+"/"+"input", *file.Data)
+
+	local_input := os.Getenv("LOCAL_STORAGE_PATH") + "/tmp/" + id + "/" + "input"
+
 	for _, s := range sizeList {
 		sm := getSizeMapping(s)
 		outputDir := "tmp/" + id + "/" + sm.Label
@@ -107,7 +110,7 @@ func EncodeFile(input string, id string, sizes string) error {
 
 		// First pass (bitrate analysis)
 		reportStatus(id, "first_pass_ready:"+sm.Label)
-		pass1 := ffmpeg.Input(input, ffmpeg.KwArgs{
+		pass1 := ffmpeg.Input(local_input, ffmpeg.KwArgs{
 			"hwaccel": hwaccel,
 		}).
 			Output("/dev/null", ffmpeg.KwArgs{
@@ -139,7 +142,7 @@ func EncodeFile(input string, id string, sizes string) error {
 
 		// Second pass (generate HLS)
 		reportStatus(id, "second_pass_ready:"+sm.Label)
-		pass2 := ffmpeg.Input(input, ffmpeg.KwArgs{
+		pass2 := ffmpeg.Input(local_input, ffmpeg.KwArgs{
 			"hwaccel": hwaccel,
 		}).
 			Output(fmt.Sprintf(storage.LocalStoragePath+"/%s/index.m3u8", outputDir), ffmpeg.KwArgs{
@@ -213,7 +216,7 @@ func EncodeFile(input string, id string, sizes string) error {
 	slog.Info("Creating thumbnails and previews", "id", id)
 	reportStatus(id, "generating_thumbnail")
 	//make a thumbnail
-	cmd := ffmpeg.Input(input).
+	cmd := ffmpeg.Input(local_input).
 		Output(storage.LocalStoragePath+"/tmp/"+id+"/imgs/thumbnail.jpg",
 			ffmpeg.KwArgs{
 				"vf":      "thumbnail,scale=1280:720",
@@ -250,7 +253,7 @@ func EncodeFile(input string, id string, sizes string) error {
 
 	var previews []Preview
 	reportStatus(id, "generating_previews")
-	cmd = ffmpeg.Input(input).
+	cmd = ffmpeg.Input(local_input).
 		Output(storage.LocalStoragePath+"/tmp/"+id+"/imgs/prev-%d.jpg",
 			ffmpeg.KwArgs{
 				"vf": "scale=160:90,fps=1/5,tile=25x1",

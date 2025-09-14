@@ -121,6 +121,9 @@ function SignedIn({ resetAuth }: { resetAuth: () => void }) {
 
   const [profiles, setProfiles] = useState<string[]>([]);
 
+  const [uploadId, setUploadId] = useState("");
+  const [uploadFile, setUploadFile] = useState<File | undefined>();
+  const [uploadProfiles, setUploadProfiles] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadPercent, setUploadPercent] = useState(0);
 
@@ -218,16 +221,17 @@ function SignedIn({ resetAuth }: { resetAuth: () => void }) {
         <form
           onSubmit={async (e) => {
             e.preventDefault();
+
+            if (!uploadFile || !uploadId.trim() || !uploadProfiles.length) {
+              alert("Please fill out all fields");
+              return;
+            }
             setUploading(true);
             setUploadPercent(0);
-            const formData = new FormData(e.target as HTMLFormElement);
-            const id = formData.get("id") as string;
-            const file = formData.get("file") as File;
-            const profiles = formData.get("profiles") as string;
 
             const queryParams = new URLSearchParams();
-            queryParams.append("id", id);
-            queryParams.append("profiles", profiles);
+            queryParams.append("id", uploadId);
+            queryParams.append("profiles", uploadProfiles.join(","));
 
             const req = new XMLHttpRequest();
             req.open(
@@ -242,7 +246,7 @@ function SignedIn({ resetAuth }: { resetAuth: () => void }) {
             req.onload = () => {
               const data = JSON.parse(req.responseText);
               if (req.status === 200) {
-                if (data.id === id) {
+                if (data.id === uploadId) {
                   setUploading(false);
                   fetchQueue();
                 } else {
@@ -261,7 +265,7 @@ function SignedIn({ resetAuth }: { resetAuth: () => void }) {
 
             //make formdata with file
             const reqFormData = new FormData();
-            reqFormData.append("file", file);
+            reqFormData.append("file", uploadFile);
 
             //send
             req.send(reqFormData);
@@ -273,7 +277,8 @@ function SignedIn({ resetAuth }: { resetAuth: () => void }) {
             className="mt-2 p-3 rounded-lg border-2 border-blue-200 focus:border-blue-500 w-full outline-none transition"
             required
             disabled={uploading}
-            name="id"
+            value={uploadId}
+            onChange={(e) => setUploadId(e.target.value)}
           />
           <input
             type="file"
@@ -281,6 +286,8 @@ function SignedIn({ resetAuth }: { resetAuth: () => void }) {
             required
             disabled={uploading}
             name="file"
+            onChange={(e) => setUploadFile(e.target.files?.[0])}
+            accept=".mp4"
           />
           <select
             multiple
@@ -288,6 +295,12 @@ function SignedIn({ resetAuth }: { resetAuth: () => void }) {
             required
             disabled={uploading}
             name="profiles"
+            value={uploadProfiles}
+            onChange={(e) =>
+              setUploadProfiles(
+                Array.from(e.target.selectedOptions, (option) => option.value)
+              )
+            }
           >
             {profiles.map((profile) => (
               <option key={profile}>{profile}</option>

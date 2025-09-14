@@ -2,3 +2,4 @@ localdata/
 tmp/
 dist/
 bin/
+run-vipstv.sh
