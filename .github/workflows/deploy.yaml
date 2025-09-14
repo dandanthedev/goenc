@@ -17,5 +17,5 @@ jobs:
         with:
           context: .
           push: true
-          tags: latest
+          tags: ghcr.io/dandanthedev/goenc:dev
           file: ./Dockerfile
