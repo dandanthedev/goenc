@@ -251,9 +251,9 @@ func APIRouter(inputRouter chi.Router) {
 			ReplyWithJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to read file"})
 			return
 		}
-		storage.LocalFilePut("tmp/"+id+"/"+"input", fileBytes)
+		storage.FilePut("tmp/"+id+"/"+"input", fileBytes)
 
-		id = encoder.AddFileToQueue(storage.LocalStoragePath+"/tmp/"+id+"/"+"input", id, profiles)
+		id = encoder.AddFileToQueue("tmp/"+id+"/"+"input", id, profiles)
 
 		ReplyWithJSON(w, http.StatusOK, map[string]string{"id": id})
 	})

@@ -13,8 +13,6 @@ import (
 	ffmpeg "github.com/u2takey/ffmpeg-go"
 )
 
-//TODO: pass local storage location to ffmpeg
-
 type SizeMappingType struct {
 	Label        string
 	Scale        string
@@ -50,6 +48,17 @@ func reportStatus(id string, status string) {
 
 func EncodeFile(input string, id string, sizes string) error {
 	reportStatus(id, "starting")
+
+	reportStatus(id, "downloading_file")
+	file, err := storage.FileGet(input, true)
+	if err != nil {
+		reportStatus(id, "error_downloading_file")
+		return err
+	}
+
+	reportStatus(id, "file_downloaded")
+	storage.LocalFilePut("tmp/"+id+"/"+"input", *file.Data)
+
 	reportStatus(id, "parsing_sizes")
 
 	sizeList := strings.Split(sizes, ",")
@@ -212,7 +221,7 @@ func EncodeFile(input string, id string, sizes string) error {
 			},
 		).OverWriteOutput()
 
-	err := cmd.Run()
+	err = cmd.Run()
 	if err != nil {
 		reportStatus(id, "error_thumbnail")
 		return err
@@ -220,11 +229,11 @@ func EncodeFile(input string, id string, sizes string) error {
 
 	//move the thumbnail to the final storage
 	reportStatus(id, "moving_thumbnail")
-	file, err := storage.LocalFileGet("tmp/" + id + "/imgs/thumbnail.jpg")
+	thumbnailData, err := storage.LocalFileGet("tmp/" + id + "/imgs/thumbnail.jpg")
 	if err != nil {
 		return err
 	}
-	if err := storage.FilePut(id+"/imgs/thumbnail.jpg", file); err != nil {
+	if err := storage.FilePut(id+"/imgs/thumbnail.jpg", thumbnailData); err != nil {
 		return err
 	}
 	if err := storage.LocalFileDelete("tmp/" + id + "/imgs/thumbnail.jpg"); err != nil {
@@ -328,6 +337,10 @@ func EncodeFile(input string, id string, sizes string) error {
 	//remove tmp dir
 	reportStatus(id, "cleanup")
 	storage.LocalDirectoryDelete("tmp/" + id)
+
+	//remove source file
+	storage.FileDelete(input)
+
 	reportStatus(id, "done")
 	return nil
 }
