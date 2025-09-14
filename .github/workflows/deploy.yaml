@@ -12,13 +12,6 @@ jobs:
       packages: write
     steps:
       - uses: actions/checkout@v3
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          push: true
-          tags: ghcr.io/dandanthedev/goenc:dev
-          file: ./Dockerfile
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
         with:
