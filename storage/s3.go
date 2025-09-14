@@ -124,8 +124,9 @@ func S3DirectoryDelete(path string) error {
 	return err
 }
 
-func S3DirectoryListing(path string, recursive bool) ([]string, error) {
+func S3DirectoryListing(path string, recursive bool, includeFolders bool) ([]string, error) {
 	var result []string
+	dirSet := make(map[string]struct{})
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(os.Getenv("S3_BUCKET")),
 		Prefix: aws.String(path),
@@ -139,18 +140,46 @@ func S3DirectoryListing(path string, recursive bool) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		for _, file := range page.Contents {
-			if file.Key != nil {
-				result = append(result, *file.Key)
+		// Always add folders from CommonPrefixes if includeFolders is true
+		if includeFolders {
+			for _, prefix := range page.CommonPrefixes {
+				println(*prefix.Prefix)
+				if prefix.Prefix != nil {
+					dir := *prefix.Prefix
+					if _, exists := dirSet[dir]; !exists {
+						dirSet[dir] = struct{}{}
+						result = append(result, dir)
+						println("Added folder:", dir)
+					}
+				}
 			}
 		}
-		if !recursive {
-			for _, prefix := range page.CommonPrefixes {
-				if prefix.Prefix != nil {
-					result = append(result, *prefix.Prefix)
+		for _, file := range page.Contents {
+			if file.Key != nil {
+				key := *file.Key
+				// Only add files (not folders) if includeFolders is true and key is not a folder
+				if includeFolders {
+					if idx := indexOfSlash(key, len(path)); idx != -1 {
+						dir := key[:idx]
+						// Already handled by CommonPrefixes, skip
+						if _, exists := dirSet[dir]; exists {
+							continue
+						}
+					}
 				}
+				result = append(result, key)
 			}
 		}
 	}
 	return result, nil
+}
+
+// indexOfSlash returns the index of the first '/' after the prefix length, or -1 if not found
+func indexOfSlash(s string, prefixLen int) int {
+	for i := prefixLen; i < len(s); i++ {
+		if s[i] == '/' {
+			return i
+		}
+	}
+	return -1
 }

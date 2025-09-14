@@ -164,7 +164,7 @@ func EncodeFile(input string, id string, sizes string) error {
 
 		// Move files from temp to final storage
 		reportStatus(id, "moving_files:"+sm.Label)
-		files, err := storage.LocalDirectoryListing(outputDir, false)
+		files, err := storage.LocalDirectoryListing(outputDir, false, false)
 		if err != nil {
 			reportStatus(id, "error_move_files:"+sm.Label)
 			return err
@@ -256,7 +256,7 @@ func EncodeFile(input string, id string, sizes string) error {
 
 	//read the sheets
 	reportStatus(id, "listing_previews")
-	sheets, err := storage.LocalDirectoryListing("tmp/"+id+"/imgs", false)
+	sheets, err := storage.LocalDirectoryListing("tmp/"+id+"/imgs", false, false)
 	if err != nil {
 		reportStatus(id, "error_preview_listing")
 		return err

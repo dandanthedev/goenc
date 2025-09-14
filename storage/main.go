@@ -114,7 +114,7 @@ func DirectoryDelete(path string) error {
 	case "local":
 		return LocalDirectoryDelete(path)
 	case "s3":
-		files, err := S3DirectoryListing(path, true)
+		files, err := S3DirectoryListing(path, true, false)
 		if err != nil {
 			return err
 		}
@@ -130,12 +130,12 @@ func DirectoryDelete(path string) error {
 	}
 }
 
-func DirectoryListing(path string, recursive bool) ([]string, error) {
+func DirectoryListing(path string, recursive bool, includeFolders bool) ([]string, error) {
 	switch storageMode {
 	case "local":
-		return LocalDirectoryListing(path, recursive)
+		return LocalDirectoryListing(path, recursive, includeFolders)
 	case "s3":
-		return S3DirectoryListing(path, recursive)
+		return S3DirectoryListing(path, recursive, includeFolders)
 	default:
 		panic("invalid storage mode")
 	}

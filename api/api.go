@@ -5,6 +5,7 @@ import (
 	"goenc/encoder"
 	"goenc/storage"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -20,6 +21,16 @@ func APIRouter(inputRouter chi.Router) {
 
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			//set cors headers
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-KEY")
+
+			if r.Method == "OPTIONS" {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+
 			token := r.Header.Get("X-API-KEY")
 
 			if token == "" {
@@ -39,6 +50,22 @@ func APIRouter(inputRouter chi.Router) {
 			}
 
 			next.ServeHTTP(w, r)
+		})
+	})
+
+	r.Get("/auth", func(w http.ResponseWriter, r *http.Request) {
+		ReplyWithJSON(w, http.StatusOK, map[string]string{"success": "true"})
+	})
+
+	r.Get("/profiles", func(w http.ResponseWriter, r *http.Request) {
+		profiles := []string{}
+		for _, sm := range encoder.SizeMapping {
+			profiles = append(profiles, sm.Label)
+		}
+
+		ReplyWithJSON(w, http.StatusOK, map[string]any{
+			"success": "true",
+			"data":    profiles,
 		})
 	})
 
@@ -143,7 +170,10 @@ func APIRouter(inputRouter chi.Router) {
 
 		playerUrl := "/" + idStr + searchParams
 
-		ReplyWithJSON(w, http.StatusOK, map[string]string{"token": tokenString, "playerUrl": playerUrl, "expires": strconv.FormatInt(exp, 10)})
+		ReplyWithJSON(w, http.StatusOK, map[string]any{
+			"success": "true",
+			"data":    map[string]any{"token": tokenString, "playerUrl": playerUrl, "expires": strconv.FormatInt(exp, 10)},
+		})
 
 	})
 
@@ -156,7 +186,8 @@ func APIRouter(inputRouter chi.Router) {
 		}
 
 		ReplyWithJSON(w, http.StatusOK, map[string]any{
-			"queue": queue,
+			"success": "true",
+			"data":    queue,
 		})
 
 	})
@@ -202,6 +233,7 @@ func APIRouter(inputRouter chi.Router) {
 
 		// Parse the multipart form with a reasonable maxMemory (e.g., 32MB)
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			slog.Error("Failed to parse multipart form", "error", err)
 			ReplyWithJSON(w, http.StatusBadRequest, map[string]string{"error": "failed to parse multipart form"})
 			return
 		}
@@ -245,6 +277,32 @@ func IdValid(id string) bool {
 func videosRouter(inputRouter chi.Router) {
 	r := chi.NewRouter()
 
+	r.Get("/list", func(w http.ResponseWriter, r *http.Request) {
+		files, err := storage.DirectoryListing("", false, true)
+		if err != nil {
+			ReplyWithJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list directory"})
+			return
+		}
+
+		slog.Debug("Directory listing", "files", files)
+
+		//filter files that don't have meta.json
+		validFiles := []string{}
+		for _, file := range files {
+			if storage.FileExists(file + "meta.json") {
+				//strip the trailing slash
+				validFiles = append(validFiles, strings.TrimSuffix(file, "/"))
+			}
+		}
+
+		ReplyWithJSON(w, http.StatusOK, map[string]any{
+			"success": true,
+			"data": map[string]any{
+				"videos": validFiles,
+			},
+		})
+	})
+
 	r.Get("/{id}", func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		if !IdValid(id) {
@@ -254,7 +312,24 @@ func videosRouter(inputRouter chi.Router) {
 
 		//we download meta as redirects aren't the best for apis
 		w.Header().Set("Content-Type", "application/json")
-		storage.ServeFile(id+"/meta.json", w, true)
+		meta, err := storage.FileGet(id+"/meta.json", true)
+		if err != nil {
+			ReplyWithJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to get meta.json"})
+			return
+		}
+
+		//convert meta.data to map
+		var metaData map[string]any
+		err = json.Unmarshal(*meta.Data, &metaData)
+		if err != nil {
+			ReplyWithJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to unmarshal meta.json"})
+			return
+		}
+
+		ReplyWithJSON(w, http.StatusOK, map[string]any{
+			"success": "true",
+			"data":    metaData,
+		})
 	})
 
 	r.Delete("/{id}", func(w http.ResponseWriter, r *http.Request) {

@@ -50,7 +50,7 @@ func LocalDirectoryCreate(path string) error {
 	return os.MkdirAll(path, 0755)
 }
 
-func LocalDirectoryListing(path string, recursive bool) ([]string, error) {
+func LocalDirectoryListing(path string, recursive bool, includeFolders bool) ([]string, error) {
 	if recursive {
 		return filepath.Glob(LocalStoragePath + path + "/*")
 	}
@@ -61,7 +61,11 @@ func LocalDirectoryListing(path string, recursive bool) ([]string, error) {
 	var fileNames []string
 	for _, file := range files {
 		if file.IsDir() {
-			continue
+			if includeFolders {
+				fileNames = append(fileNames, file.Name())
+			} else {
+				continue
+			}
 		}
 		fileNames = append(fileNames, file.Name())
 	}
